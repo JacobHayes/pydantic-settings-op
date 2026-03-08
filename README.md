@@ -1,5 +1,9 @@
 # pydantic-settings-op
 
+[![PyPI version](https://img.shields.io/pypi/v/pydantic-settings-op)](https://pypi.org/project/pydantic-settings-op/)
+[![Python versions](https://img.shields.io/pypi/pyversions/pydantic-settings-op)](https://pypi.org/project/pydantic-settings-op/)
+[![License](https://img.shields.io/pypi/l/pydantic-settings-op)](https://github.com/JacobHayes/pydantic-settings-op/blob/main/LICENSE)
+
 A [1Password](https://1password.com/) secrets source for [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
 
 ## Installation
