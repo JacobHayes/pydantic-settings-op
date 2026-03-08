@@ -21,7 +21,10 @@ classifiers = [
   "Topic :: Security",
   "Typing :: Typed",
 ]
-dependencies = ["onepassword-sdk", "pydantic-settings"]
+dependencies = [
+    "onepassword-sdk>=0.4.1b1",
+    "pydantic-settings",
+]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-asyncio"]

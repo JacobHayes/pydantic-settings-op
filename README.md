@@ -4,7 +4,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/pydantic-settings-op)](https://pypi.org/project/pydantic-settings-op/)
 [![License](https://img.shields.io/pypi/l/pydantic-settings-op)](https://github.com/JacobHayes/pydantic-settings-op/blob/main/LICENSE)
 
-A [1Password](https://1password.com/) secrets source for [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
+A [1Password](https://1password.com/) secrets source for [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/), supporting both **Vaults** and **Environments**.
 
 ## Installation
 
@@ -13,6 +13,8 @@ pip install pydantic-settings-op
 ```
 
 ## Usage
+
+### From a Vault
 
 ```python
 from pydantic_settings import BaseSettings
@@ -33,9 +35,9 @@ settings = Settings()
 
 By convention, each field name is used as the 1Password item name within the configured vault, trying `password` then `credential` as the field name (configurable via `default_fields`).
 
-### Explicit field references with `OPField`
+#### Explicit field references with `OPField`
 
-For fields that don't follow the convention, use `OPField` to specify an explicit secret reference:
+For fields that don't follow the convention, use `OPField` to specify an explicit secret reference (vault source only):
 
 ```python
 from typing import Annotated
@@ -50,6 +52,27 @@ class Settings(BaseSettings):
     api_key: Annotated[str, OPField("op://other-vault/api/key")]
 ```
 
+### From an Environment
+
+[1Password Environments](https://developer.1password.com/docs/environments/) provide a flat key-value store of secrets. Field names are matched directly against environment variable names.
+
+```python
+from pydantic_settings import BaseSettings
+
+from pydantic_settings_op import OPEnvironmentSettingsSource
+
+
+class Settings(BaseSettings):
+    db_password: str
+    api_key: str
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+        return (init_settings, env_settings, OPEnvironmentSettingsSource(settings_cls, environment_id="your-environment-id"))
+
+settings = Settings()
+```
+
 ### Authentication
 
 Authentication is resolved in order:
@@ -62,4 +85,4 @@ You can also pass a pre-configured `client` directly instead of using `auth`.
 
 ### Aliases
 
-The source respects pydantic's `alias`, `validation_alias`, and `AliasChoices` when emitting keys, so resolved secrets integrate with your existing alias configuration.
+Both sources respect pydantic's `alias`, `validation_alias`, and `AliasChoices` when emitting keys, so resolved secrets integrate with your existing alias configuration.

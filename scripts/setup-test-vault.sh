@@ -3,6 +3,11 @@
 # Requires: `op` CLI authenticated (https://developer.1password.com/docs/cli)
 #
 # Usage: ./scripts/setup-test-vault.sh
+#
+# NOTE: 1Password Environments must be created manually via the desktop app
+# (Developer > View Environments > New environment). See the "Environment setup"
+# section below for required variables. Set TEST_OP_ENVIRONMENT_ID to the
+# environment ID after creation.
 set -euo pipefail
 
 VAULT="pydantic-settings-op-test"
@@ -27,4 +32,20 @@ create_item "$VAULT" "api_key" "credential" "api-secret"
 create_item "$VAULT" "signing_key" "key" "signing-secret"
 create_item "$VAULT_ALT" "api" "key" "other-api-key"
 
-echo "Done. Run tests with: pytest --integration"
+# ---------------------------------------------------------------------------
+# Environment setup (manual — Environments cannot be created via CLI/SDK)
+# ---------------------------------------------------------------------------
+# Create an Environment in the 1Password desktop app with these variables:
+#
+#   db_password = env-secret123
+#   api_key     = env-api-secret
+#
+# Then copy the environment ID (Manage environment > Copy environment ID) and
+# set TEST_OP_ENVIRONMENT_ID before running integration tests.
+# ---------------------------------------------------------------------------
+
+echo ""
+echo "Done."
+echo ""
+echo "Vault tests:       pytest --integration=desktop (or service-account)"
+echo "Environment tests: also requires TEST_OP_ENVIRONMENT_ID (see script comments)"

@@ -13,8 +13,10 @@ pytest --integration=service-account  # real 1Password via service account (requ
 
 Single-module library at `src/pydantic_settings_op/__init__.py`.
 
-- **Field resolution order**: `OPField` annotation first, then convention-based lookup (`field_name/{password,credential}`). Missing items/fields return `None`; missing vaults raise (misconfiguration).
-- **Protocols over concrete types**: use `Client`/`Secrets` protocols (not `onepassword` concrete classes) for type hints and test injection.
+- **Two source types**: `OPVaultSettingsSource` (vault-based secret references) and `OPEnvironmentSettingsSource` (1Password Environments key-value lookup). Both extend `_OPBaseSettingsSource` which provides shared client management, alias handling, and field iteration.
+- **Vault field resolution order**: `OPField` annotation first, then convention-based lookup (`field_name/{password,credential}`). Missing items/fields return `None`; missing vaults raise (misconfiguration).
+- **Environment field resolution**: matches pydantic field names directly against Environment variable names. `OPField` is not used.
+- **Protocols over concrete types**: use `Client`/`Secrets`/`Environments` protocols (not `onepassword` concrete classes) for type hints and test injection.
 - **Sync/async bridge**: `run_sync` bridges the async `onepassword` SDK. Use `asyncio.run()` in sync contexts and thread pool executor in async contexts — never block an existing event loop.
 - **Alias-aware keys**: emit alias/validation_alias/AliasChoices-aware keys so resolved secrets integrate with pydantic's aliasing.
 
@@ -25,10 +27,11 @@ Single-module library at `src/pydantic_settings_op/__init__.py`.
 
 # Testing
 
-- Mock and real backends share expected values (`TEST_SECRETS` in `tests/conftest.py`, synced with `scripts/setup-test-vault.sh`).
-- Mocks replicate real error distinctions — vault-not-found vs item/field-not-found must produce different errors matching 1Password SDK behavior.
-- Use the library's own protocols (`Client`, `Secrets`) in tests — no test-specific wrapper protocols.
+- Mock and real backends share expected values (`TEST_SECRETS` and `TEST_ENVIRONMENT_VARIABLES` in `tests/conftest.py`, synced with `scripts/setup-test-vault.sh`).
+- Mocks replicate real error distinctions — vault-not-found vs item/field-not-found and environment-not-found must produce different errors matching 1Password SDK behavior.
+- Use the library's own protocols (`Client`, `Secrets`, `Environments`) in tests — no test-specific wrapper protocols.
 - Default to `MockClient` via `op_client` fixture; `--integration=desktop` or `--integration=service-account` for real 1Password.
+- Environment integration tests require `TEST_OP_ENVIRONMENT_ID` (Environments cannot be created via CLI/SDK — must be set up manually in the desktop app).
 
 # Releases
 

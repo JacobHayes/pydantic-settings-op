@@ -16,13 +16,19 @@ from pydantic.fields import FieldInfo
 from pydantic_settings.main import BaseSettings
 from pydantic_settings.sources.base import PydanticBaseSettingsSource
 
-__all__ = ["DesktopAuth", "OPField", "OPVaultSettingsSource"]
+__all__ = ["DesktopAuth", "OPEnvironmentSettingsSource", "OPField", "OPVaultSettingsSource"]
 
 # ---------------------------------------------------------------------------
 # Types & protocols
 # ---------------------------------------------------------------------------
 
 Auth = str | DesktopAuth
+
+
+class Environments(Protocol):
+    """Protocol matching onepassword.Environments interface."""
+
+    def get_variables(self, environment_id: str) -> Coroutine[Any, Any, onepassword.types.GetVariablesResponse]: ...
 
 
 class Secrets(Protocol):
@@ -36,12 +42,17 @@ class Client(Protocol):
     """Protocol matching onepassword.Client interface."""
 
     @property
+    def environments(self) -> Environments: ...
+
+    @property
     def secrets(self) -> Secrets: ...
 
 
 @dataclass(frozen=True, slots=True)
 class OPField:
-    """Annotation to specify explicit 1Password URI for a field.
+    """Annotation to specify an explicit 1Password secret reference for a field.
+
+    Only used by OPVaultSettingsSource (ignored by OPEnvironmentSettingsSource).
 
     The URI can be either:
     - A relative path like "item/field" (vault from source config will be prepended)
@@ -164,7 +175,68 @@ NOT_FOUND_MESSAGES = (
 )
 
 
-class OPVaultSettingsSource(PydanticBaseSettingsSource):
+class _OPBaseSettingsSource(PydanticBaseSettingsSource):
+    """Base class for 1Password settings sources with shared client management and alias handling."""
+
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        *,
+        auth: Auth | None = None,
+        client: Client | None = None,
+    ) -> None:
+        if client is not None and auth is not None:
+            raise ValueError("'client' and 'auth' are mutually exclusive.")
+        super().__init__(settings_cls)
+        self._client = client
+        self._auth = auth
+
+    def _get_client(self) -> Client:
+        if self._client is None:
+            self._client = create_client(self._auth)
+        return self._client
+
+    def _preferred_field_key(self, field: FieldInfo, field_name: str) -> str | None:
+        """Return the alias-aware key expected during model construction, or None if no flat key is usable.
+
+        Returns None when validation_alias is set but contains only multi-segment AliasPath entries —
+        this source emits flat key/value mappings, so multi-segment path aliases cannot be represented.
+        Single-segment AliasPath entries (e.g. AliasPath("KEY")) are treated as flat keys.
+        """
+        # When validation_alias is set, pydantic ignores alias and field_name for input,
+        # so we must only consider the validation_alias itself.
+        if field.validation_alias is not None:
+            if isinstance(field.validation_alias, str):
+                return field.validation_alias
+            if isinstance(field.validation_alias, AliasPath):
+                # Single-segment AliasPath (e.g. AliasPath("KEY")) is a flat key pydantic can consume.
+                if len(field.validation_alias.path) == 1 and isinstance(field.validation_alias.path[0], str):
+                    return field.validation_alias.path[0]
+                return None
+            for choice in field.validation_alias.choices:
+                if isinstance(choice, str):
+                    return choice
+                if len(choice.path) == 1 and isinstance(choice.path[0], str):
+                    return choice.path[0]
+            # AliasChoices with only multi-segment AliasPath entries — no usable flat key.
+            return None
+
+        if isinstance(field.alias, str):
+            return field.alias
+
+        return field_name
+
+    def __call__(self) -> dict[str, Any]:
+        d: dict[str, Any] = {}
+        for field_name, field_info in self.settings_cls.model_fields.items():
+            value, field_key, value_is_complex = self.get_field_value(field_info, field_name)
+            value = self.prepare_field_value(field_name, field_info, value, value_is_complex)
+            if value is not None:
+                d[field_key] = value
+        return d
+
+
+class OPVaultSettingsSource(_OPBaseSettingsSource):
     """Settings source that reads secrets from a 1Password Vault.
 
     Resolution order for each pydantic field:
@@ -187,8 +259,8 @@ class OPVaultSettingsSource(PydanticBaseSettingsSource):
         settings_cls: type[BaseSettings],
         vault: str,
         *,
-        client: Client | None = None,
         auth: Auth | None = None,
+        client: Client | None = None,
         default_fields: tuple[str, ...] = ("password", "credential"),
     ) -> None:
         """Initialize the 1Password Vault settings source.
@@ -196,27 +268,18 @@ class OPVaultSettingsSource(PydanticBaseSettingsSource):
         Args:
             settings_cls: The Settings class.
             vault: The 1Password vault name or ID.
-            client: Pre-configured 1Password client. Mutually exclusive with auth.
             auth: Authentication credential — a service account token string, a DesktopAuth
                 instance, or None to auto-detect from env vars. Mutually exclusive with client.
+            client: Pre-configured 1Password client. Mutually exclusive with auth.
             default_fields: Field names to try within items when no explicit OPField is set.
 
         Raises:
             ValueError: If both client and auth are provided.
         """
-        if client is not None and auth is not None:
-            raise ValueError("'client' and 'auth' are mutually exclusive.")
-        super().__init__(settings_cls)
+        super().__init__(settings_cls, auth=auth, client=client)
         self.vault = vault
-        self._client = client
-        self._auth = auth
         self.default_fields = default_fields
         self._secrets_cache: dict[str, str] = {}
-
-    def _get_client(self) -> Client:
-        if self._client is None:
-            self._client = create_client(self._auth)
-        return self._client
 
     def _get_op_field_annotation(self, field_info: FieldInfo) -> OPField | None:
         """Extract OPField annotation from a field if present."""
@@ -252,36 +315,6 @@ class OPVaultSettingsSource(PydanticBaseSettingsSource):
                 return None
             raise
 
-    def _preferred_field_key(self, field: FieldInfo, field_name: str) -> str | None:
-        """Return the alias-aware key expected during model construction, or None if no flat key is usable.
-
-        Returns None when validation_alias is set but contains only multi-segment AliasPath entries —
-        this source emits flat key/value mappings, so multi-segment path aliases cannot be represented.
-        Single-segment AliasPath entries (e.g. AliasPath("KEY")) are treated as flat keys.
-        """
-        # When validation_alias is set, pydantic ignores alias and field_name for input,
-        # so we must only consider the validation_alias itself.
-        if field.validation_alias is not None:
-            if isinstance(field.validation_alias, str):
-                return field.validation_alias
-            if isinstance(field.validation_alias, AliasPath):
-                # Single-segment AliasPath (e.g. AliasPath("KEY")) is a flat key pydantic can consume.
-                if len(field.validation_alias.path) == 1 and isinstance(field.validation_alias.path[0], str):
-                    return field.validation_alias.path[0]
-                return None
-            for choice in field.validation_alias.choices:
-                if isinstance(choice, str):
-                    return choice
-                if len(choice.path) == 1 and isinstance(choice.path[0], str):
-                    return choice.path[0]
-            # AliasChoices with only multi-segment AliasPath entries — no usable flat key.
-            return None
-
-        if isinstance(field.alias, str):
-            return field.alias
-
-        return field_name
-
     def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
         """Resolve a single field's value from 1Password."""
         is_complex = self.field_is_complex(field)
@@ -308,14 +341,72 @@ class OPVaultSettingsSource(PydanticBaseSettingsSource):
 
         return None, field_key, is_complex
 
-    def __call__(self) -> dict[str, Any]:
-        d: dict[str, Any] = {}
-        for field_name, field_info in self.settings_cls.model_fields.items():
-            value, field_key, value_is_complex = self.get_field_value(field_info, field_name)
-            value = self.prepare_field_value(field_name, field_info, value, value_is_complex)
-            if value is not None:
-                d[field_key] = value
-        return d
-
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(vault={self.vault!r})"
+
+
+class OPEnvironmentSettingsSource(_OPBaseSettingsSource):
+    """Settings source that reads secrets from a 1Password Environment.
+
+    Field names are matched against Environment variable names (keys).
+
+    Example:
+        class Settings(BaseSettings):
+            db_password: str
+
+            @classmethod
+            def settings_customise_sources(
+                cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+            ):
+                return (init_settings, env_settings, OPEnvironmentSettingsSource(settings_cls, environment_id="env_abc123"))
+    """
+
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        environment_id: str,
+        *,
+        auth: Auth | None = None,
+        client: Client | None = None,
+    ) -> None:
+        """Initialize the 1Password Environment settings source.
+
+        Args:
+            settings_cls: The Settings class.
+            environment_id: The 1Password Environment ID.
+            auth: Authentication credential — a service account token string, a DesktopAuth
+                instance, or None to auto-detect from env vars. Mutually exclusive with client.
+            client: Pre-configured 1Password client. Mutually exclusive with auth.
+
+        Raises:
+            ValueError: If both client and auth are provided.
+        """
+        super().__init__(settings_cls, auth=auth, client=client)
+        self.environment_id = environment_id
+        self._variables: dict[str, str] | None = None
+
+    def _get_variables(self) -> dict[str, str]:
+        """Fetch and cache environment variables from 1Password, keyed by variable name."""
+        if self._variables is None:
+            client = self._get_client()
+            response = run_sync(client.environments.get_variables(self.environment_id))
+            self._variables = {var.name: var.value for var in response.variables}
+        return self._variables
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        """Resolve a single field's value from the 1Password Environment."""
+        is_complex = self.field_is_complex(field)
+        field_key = self._preferred_field_key(field, field_name)
+
+        if field_key is None:
+            return None, field_name, is_complex
+
+        variables = self._get_variables()
+        value = variables.get(field_name)
+        if value is not None:
+            return value, field_key, is_complex
+
+        return None, field_key, is_complex
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(environment_id={self.environment_id!r})"
