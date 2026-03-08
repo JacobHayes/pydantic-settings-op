@@ -29,3 +29,8 @@ Single-module library at `src/pydantic_settings_op/__init__.py`.
 - Mocks replicate real error distinctions — vault-not-found vs item/field-not-found must produce different errors matching 1Password SDK behavior.
 - Use the library's own protocols (`Client`, `Secrets`) in tests — no test-specific wrapper protocols.
 - Default to `MockClient` via `op_client` fixture; `--integration=desktop` or `--integration=service-account` for real 1Password.
+
+# Releases
+
+- **Version in pyproject.toml is static**: CI sets the real version from the tag at build time. Don't update `pyproject.toml` version for releases.
+- Cut releases with `scripts/release.sh`.
