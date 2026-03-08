@@ -1,0 +1,34 @@
+# Publishes to PyPI using trusted publishing (OIDC). No tokens needed.
+#
+# Setup:
+#   1. Create the "pypi" GitHub environment, restricted to the main branch:
+#        gh api repos/{owner}/{repo}/environments/pypi -X PUT --input - <<< '{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+#        gh api repos/{owner}/{repo}/environments/pypi/deployment-branch-policies -X POST --input - <<< '{"name":"main","type":"branch"}'
+#   2. Add a trusted publisher on PyPI:
+#      - New project (pending publisher): https://pypi.org/manage/account/publishing/
+#      - Existing project: https://pypi.org/manage/project/{project}/settings/publishing/
+#      Set:
+#        - Owner: {owner}
+#        - Repository: {repo}
+#        - Workflow name: publish.yml
+#        - Environment: pypi
+#   3. Create a GitHub release to trigger a publish.
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v3
+      - run: uv version "$GITHUB_REF_NAME" --no-sync
+      - run: uv build
+      - run: uv publish # Auto-detects the GitHub token for trusted publishing.

@@ -1,0 +1,33 @@
+[hooks]
+enter = "mise install && uv sync"
+postinstall = "uv sync"
+
+[tools]
+uv = "latest"
+
+[settings]
+experimental = true
+lockfile = true
+python.uv_venv_auto = true
+
+[[watch_files]]
+patterns = [".python-version", "pyproject.toml", "uv.lock"]
+run = "uv sync"
+
+[tasks.check]
+description = "Run all pre-commit checks"
+quiet = true
+run = """
+ruff format
+ruff check --fix
+pyright
+pytest
+"""
+
+[tasks.review]
+description = "Run codex review on the uncommitted changes"
+quiet = true
+run = """
+echo "Reviewing uncommitted changes..."
+codex review --uncommitted 2>&1 | awk '/^codex$/ { found=1; next } found { print }'
+"""
