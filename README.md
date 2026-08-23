@@ -25,8 +25,11 @@ class Settings(BaseSettings):
     api_key: str
 
     @classmethod
-    def settings_customise_sources(cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings):
+    def settings_customise_sources(
+        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings
+    ):
         return (init_settings, env_settings, OPVaultSettingsSource(settings_cls, vault="MyVault"))
+
 
 settings = Settings()
 ```
@@ -41,6 +44,7 @@ For fields that don't follow the convention, use `OPField` to specify an explici
 from typing import Annotated
 
 from pydantic_settings_op import OPField
+
 
 class Settings(BaseSettings):
     # Relative path — vault from OPVaultSettingsSource is prepended
